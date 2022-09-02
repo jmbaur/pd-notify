@@ -39,6 +39,7 @@ func paginate[T any](f func(next uint) (t []T, more bool, nnext uint)) []T {
 }
 
 func logic() error {
+	overrideUser := flag.String("user", "", "Name of user to listen for (default is current user)")
 	flag.Parse()
 
 	cacheDir, err := os.UserCacheDir()
@@ -68,19 +69,43 @@ func logic() error {
 	}
 
 	client := pd.NewClient(config.ApiKey)
-	user, err := client.GetCurrentUser(pd.GetCurrentUserOptions{})
+	currentUser, err := client.GetCurrentUser(pd.GetCurrentUserOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get user: %v", err)
 	}
 
+	var userID string
+	var userName string
+
 	teamIDs := []string{}
-	for _, team := range user.Teams {
+	for _, team := range currentUser.Teams {
 		teamIDs = append(teamIDs, team.ID)
+		if userID == "" && *overrideUser != "" {
+			members := paginate(func(next uint) ([]pd.Member, bool, uint) {
+				response, err := client.ListTeamMembers(context.Background(), team.ID, pd.ListTeamMembersOptions{})
+				if err != nil {
+					return []pd.Member{}, false, 0
+				}
+				return response.Members, response.More, response.Total
+			})
+
+			for _, member := range members {
+				if member.User.Summary == *overrideUser {
+					userID = member.User.ID
+					userName = member.User.Summary
+				}
+			}
+		}
+	}
+
+	if userID == "" {
+		userID = currentUser.ID
+		userName = currentUser.Name
 	}
 
 	escPolicies := paginate(func(next uint) ([]pd.EscalationPolicy, bool, uint) {
 		response, err := client.ListEscalationPoliciesWithContext(context.Background(), pd.ListEscalationPoliciesOptions{
-			UserIDs: []string{user.ID},
+			UserIDs: []string{userID},
 			Offset:  next,
 		})
 		if err != nil {
@@ -89,10 +114,10 @@ func logic() error {
 		return response.EscalationPolicies, response.More, response.Total
 	})
 
-	fmt.Printf("Hello, %s!\n", user.Name)
+	fmt.Printf("Active user: %s\n", userName)
 
 	if len(escPolicies) == 0 {
-		fmt.Printf("Looks like you don't have any escalation policies, good for you!\nGoodbye.\n")
+		fmt.Printf("Looks like %s don't have any escalation policies.\nGoodbye!\n", userName)
 		os.Exit(0)
 	}
 
@@ -107,7 +132,7 @@ func logic() error {
 
 	oncalls := paginate(func(next uint) ([]pd.OnCall, bool, uint) {
 		response, err := client.ListOnCallsWithContext(context.Background(), pd.ListOnCallOptions{
-			UserIDs:             []string{user.ID},
+			UserIDs:             []string{userID},
 			EscalationPolicyIDs: escalationPolicyIDs,
 		})
 		if err != nil {
@@ -128,10 +153,10 @@ func logic() error {
 	}
 
 	if len(oncalls) == 0 || timeUntilOncall > 1*time.Hour {
-		fmt.Printf("Looks like you don't have any oncalls starting soon.\nGoodbye!\n")
+		fmt.Printf("Looks like %s doesn't have any oncalls starting soon.\nGoodbye!\n", userName)
 		os.Exit(0)
 	} else if timeUntilOncall > time.Duration(0) {
-		fmt.Printf("Starting oncall in %s. Waiting until then.", timeUntilOncall)
+		fmt.Printf("%s is starting oncall in %s. Waiting until then.", userName, timeUntilOncall)
 		time.Sleep(timeUntilOncall)
 	}
 
@@ -140,7 +165,7 @@ func logic() error {
 		incidents := paginate(func(next uint) ([]pd.Incident, bool, uint) {
 			response, err := client.ListIncidentsWithContext(context.Background(), pd.ListIncidentsOptions{
 				ServiceIDs: serviceIDs,
-				UserIDs:    []string{user.ID},
+				UserIDs:    []string{userID},
 				TeamIDs:    teamIDs,
 				Offset:     next,
 			})
