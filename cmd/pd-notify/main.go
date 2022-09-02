@@ -3,45 +3,73 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	pd "github.com/PagerDuty/go-pagerduty"
 	"github.com/gen2brain/beeep"
 )
 
+//go:embed alert.png
+var alertIconContents []byte
+
 type Config struct {
 	ApiKey string
 }
 
-//go:embed alert.png
-var alertIconContents string
+func paginate[T any](f func(next uint) (t []T, more bool, nnext uint)) []T {
+	allItems := []T{}
+	var next uint = 0
+	for {
+		items, more, nnext := f(next)
+		next = nnext
+		allItems = append(allItems, items...)
+		if !more {
+			break
+		}
+	}
 
-func main() {
+	return allItems
+}
+
+func logic() error {
 	flag.Parse()
 
-	alertIconFile, err := ioutil.TempFile("", "pd-notify")
+	cacheDir, err := os.UserCacheDir()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	defer os.Remove(alertIconFile.Name())
-
-	if _, err := alertIconFile.WriteString(alertIconContents); err != nil {
-		log.Fatal(err)
+	alertIconPath := filepath.Join(cacheDir, "pd-notify-alert-icon.png")
+	if _, err := os.Stat(alertIconPath); errors.Is(err, os.ErrNotExist) {
+		alertIconFile, err := os.Create(alertIconPath)
+		if err != nil {
+			return err
+		}
+		if _, err := alertIconFile.Write(alertIconContents); err != nil {
+			return err
+		}
+		alertIconFile.Close()
+	} else if err != nil {
+		return err
 	}
 
+	apiKey, ok := os.LookupEnv("PD_API_KEY")
+	if !ok {
+		return errors.New("could not find API key, make sure PD_API_KEY is set")
+	}
 	config := &Config{
-		ApiKey: os.Getenv("PD_API_KEY"),
+		ApiKey: apiKey,
 	}
 
 	client := pd.NewClient(config.ApiKey)
 	user, err := client.GetCurrentUser(pd.GetCurrentUserOptions{})
 	if err != nil {
-		log.Fatal("failed to get user", err)
+		return fmt.Errorf("failed to get user: %v", err)
 	}
 
 	teamIDs := []string{}
@@ -87,8 +115,7 @@ func main() {
 		return response.OnCalls, response.More, response.Total
 	})
 
-	currentlyOncall := false
-	hasOncallStartingSoon := false
+	timeUntilOncall := time.Duration(0)
 	for _, oncall := range oncalls {
 		start, err := time.Parse(time.RFC3339, oncall.Start)
 		if err != nil {
@@ -96,24 +123,20 @@ func main() {
 			continue
 		}
 
-		until := time.Until(start)
-		if until < time.Duration(0) {
-			currentlyOncall = true
-		}
-
-		if until < time.Duration(1*time.Hour) && until > time.Duration(0) {
-			hasOncallStartingSoon = true
-		}
+		timeUntilOncall = time.Until(start)
 	}
 
-	if !currentlyOncall && !hasOncallStartingSoon {
+	if len(oncalls) == 0 || timeUntilOncall > 1*time.Hour {
 		fmt.Printf("Looks like you don't have any oncalls starting soon.\nGoodbye!\n")
 		os.Exit(0)
+	} else if timeUntilOncall > time.Duration(0) {
+		fmt.Printf("Starting oncall in %s. Waiting until then.", timeUntilOncall)
+		time.Sleep(timeUntilOncall)
 	}
 
-	_ = beeep.Alert("foo", "bar", alertIconFile.Name())
+	_ = beeep.Alert("pd-notify", "Listening for incidents...", alertIconPath)
 
-	fmt.Println("Checking for incidents...")
+	fmt.Println("Listening for incidents...")
 	for {
 		incidents := paginate(func(next uint) ([]pd.Incident, bool, uint) {
 			response, err := client.ListIncidentsWithContext(context.Background(), pd.ListIncidentsOptions{
@@ -129,7 +152,7 @@ func main() {
 		})
 
 		for _, incident := range incidents {
-			if err := beeep.Alert(incident.Description, incident.Summary, alertIconFile.Name()); err != nil {
+			if err := beeep.Alert(incident.Description, incident.Summary, alertIconPath); err != nil {
 				log.Println("failed to send notification", err)
 				fmt.Println("NEW INCIDENT")
 				fmt.Println(incident.Description)
@@ -140,17 +163,8 @@ func main() {
 	}
 }
 
-func paginate[T any](f func(next uint) (t []T, more bool, nnext uint)) []T {
-	allItems := []T{}
-	var next uint = 0
-	for {
-		items, more, nnext := f(next)
-		next = nnext
-		allItems = append(allItems, items...)
-		if !more {
-			break
-		}
+func main() {
+	if err := logic(); err != nil {
+		log.Fatal(err)
 	}
-
-	return allItems
 }
