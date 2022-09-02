@@ -127,8 +127,6 @@ func logic() error {
 		timeUntilOncall = time.Until(start)
 	}
 
-	_ = notifications.Notify("foo", "bar", alertIconPath)
-
 	if len(oncalls) == 0 || timeUntilOncall > 1*time.Hour {
 		fmt.Printf("Looks like you don't have any oncalls starting soon.\nGoodbye!\n")
 		os.Exit(0)
