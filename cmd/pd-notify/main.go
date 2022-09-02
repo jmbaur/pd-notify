@@ -9,10 +9,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	pd "github.com/PagerDuty/go-pagerduty"
-	"github.com/gen2brain/beeep"
+	"github.com/jmbaur/pd-notify/notifications"
 )
 
 //go:embed alert.png
@@ -126,6 +127,8 @@ func logic() error {
 		timeUntilOncall = time.Until(start)
 	}
 
+	_ = notifications.Notify("foo", "bar", alertIconPath)
+
 	if len(oncalls) == 0 || timeUntilOncall > 1*time.Hour {
 		fmt.Printf("Looks like you don't have any oncalls starting soon.\nGoodbye!\n")
 		os.Exit(0)
@@ -133,8 +136,6 @@ func logic() error {
 		fmt.Printf("Starting oncall in %s. Waiting until then.", timeUntilOncall)
 		time.Sleep(timeUntilOncall)
 	}
-
-	_ = beeep.Alert("pd-notify", "Listening for incidents...", alertIconPath)
 
 	fmt.Println("Listening for incidents...")
 	for {
@@ -152,11 +153,12 @@ func logic() error {
 		})
 
 		for _, incident := range incidents {
-			if err := beeep.Alert(incident.Description, incident.Summary, alertIconPath); err != nil {
+			if err := notifications.Notify(incident.Description, incident.Summary, alertIconPath); err != nil {
 				log.Println("failed to send notification", err)
 				fmt.Println("NEW INCIDENT")
 				fmt.Println(incident.Description)
 				fmt.Println(incident.Summary)
+				log.Println(strings.Repeat("=", 80))
 			}
 		}
 		time.Sleep(5 * time.Minute)
