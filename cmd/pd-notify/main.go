@@ -141,23 +141,37 @@ func logic() error {
 		return response.OnCalls, response.More, response.Total
 	})
 
-	timeUntilOncall := time.Duration(0)
+	var currentOncall *pd.OnCall
+	var oncallStart time.Time
+	var oncallEnd time.Time
 	for _, oncall := range oncalls {
 		start, err := time.Parse(time.RFC3339, oncall.Start)
 		if err != nil {
 			log.Println("got invalid time format from pagerduty")
 			continue
 		}
+		end, err := time.Parse(time.RFC3339, oncall.End)
+		if err != nil {
+			log.Println("got invalid time format from pagerduty")
+			continue
+		}
 
-		timeUntilOncall = time.Until(start)
+		if time.Until(start) <= 1*time.Hour && end.After(time.Now()) {
+			currentOncall = &oncall
+			oncallStart = start
+			oncallEnd = end
+			break
+		}
 	}
 
-	if len(oncalls) == 0 || timeUntilOncall > 1*time.Hour {
+	if currentOncall == nil {
 		fmt.Printf("Looks like %s doesn't have any oncalls starting soon.\nGoodbye!\n", userName)
 		os.Exit(0)
-	} else if timeUntilOncall > time.Duration(0) {
-		fmt.Printf("%s is starting oncall in %s. Waiting until then.", userName, timeUntilOncall)
-		time.Sleep(timeUntilOncall)
+	}
+
+	if oncallStart.After(time.Now()) {
+		fmt.Printf("%s is starting oncall in %s. Waiting until then.", userName, time.Until(oncallStart))
+		time.Sleep(time.Until(oncallStart))
 	}
 
 	fmt.Println("Listening for incidents...")
@@ -184,8 +198,16 @@ func logic() error {
 				log.Println(strings.Repeat("=", 80))
 			}
 		}
+
+		if oncallEnd.Before(time.Now()) {
+			fmt.Printf("Oncall ended.\nGoodbye!\n")
+			break
+		}
+
 		time.Sleep(5 * time.Minute)
 	}
+
+	return nil
 }
 
 func main() {
