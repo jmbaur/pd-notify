@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	pd "github.com/PagerDuty/go-pagerduty"
@@ -190,12 +189,9 @@ func logic() error {
 		})
 
 		for _, incident := range incidents {
-			if err := notifications.Notify(incident.Description, incident.Summary, alertIconPath); err != nil {
-				log.Println("failed to send notification", err)
-				fmt.Println("NEW INCIDENT")
-				fmt.Println(incident.Description)
-				fmt.Println(incident.Summary)
-				log.Println(strings.Repeat("=", 80))
+			if len(incident.Acknowledgements) == 0 {
+				fmt.Printf("new incident: incident %d", incident.IncidentNumber)
+				notifications.Notify(incident.Description, incident.Summary, alertIconPath)
 			}
 		}
 
