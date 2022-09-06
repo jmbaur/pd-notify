@@ -190,7 +190,7 @@ func logic() error {
 
 		for _, incident := range incidents {
 			if len(incident.Acknowledgements) == 0 {
-				fmt.Printf("new incident: incident %d", incident.IncidentNumber)
+				fmt.Printf("new incident: incident %d\n", incident.IncidentNumber)
 				notifications.Notify(incident.Description, incident.Summary, alertIconPath)
 			}
 		}
