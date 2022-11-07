@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -49,21 +50,30 @@ func paginate[T any](f func(next uint) (t []T, more bool, nnext uint)) []T {
 }
 
 func logic() error {
-	overrideApiKey := flag.String("api-key", "", "PagerDuty API key (default is set from $PD_API_KEY)")
+	overrideApiKeyFile := flag.String("api-key-file", "", "File that contains the PagerDuty API key (default will be set from $PD_API_KEY)")
 	overrideUser := flag.String("user", "", "Name of user to listen for (default is current user)")
 	flag.Parse()
 
 	var config *Config
 	{
 		var apiKey string
-		envApiKey, envApiKeyIsSet := os.LookupEnv("PD_API_KEY")
-
-		if *overrideApiKey != "" {
-			apiKey = *overrideApiKey
-		} else if envApiKeyIsSet {
+		if *overrideApiKeyFile != "" {
+			f, err := os.Open(*overrideApiKeyFile)
+			if err != nil {
+				return err
+			}
+			d, err := io.ReadAll(f)
+			if err != nil {
+				return err
+			}
+			apiKey = string(d)
+			if err := f.Close(); err != nil {
+				return err
+			}
+		} else if envApiKey, ok := os.LookupEnv("PD_API_KEY"); ok {
 			apiKey = envApiKey
 		} else {
-			return errors.New("could not find API key, make sure $PD_API_KEY is set or specify it via the -api-key flag")
+			return errors.New("could not find API key")
 		}
 
 		config = &Config{ApiKey: apiKey}
