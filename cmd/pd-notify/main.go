@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"errors"
@@ -66,10 +67,10 @@ func logic() error {
 			if err != nil {
 				return err
 			}
-			apiKey = string(d)
 			if err := f.Close(); err != nil {
 				return err
 			}
+			apiKey = string(bytes.TrimSpace(d))
 		} else if envApiKey, ok := os.LookupEnv("PD_API_KEY"); ok {
 			apiKey = envApiKey
 		} else {
