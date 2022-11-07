@@ -8,18 +8,29 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"time"
 
 	pd "github.com/PagerDuty/go-pagerduty"
-	"github.com/jmbaur/pd-notify/notifications"
 )
-
-//go:embed alert.png
-var alertIconContents []byte
 
 type Config struct {
 	ApiKey string
+}
+
+var (
+	sequenceFormatString     = "\033]777;notify;%s;%s\007"
+	tmuxSequenceFormatString = "\033Ptmux;\033%s\033\\"
+)
+
+func getNotifier() func(body string) {
+	_, isTmux := os.LookupEnv("TMUX")
+	return func(body string) {
+		if isTmux {
+			fmt.Printf(fmt.Sprintf(tmuxSequenceFormatString, sequenceFormatString), "pd-notify", body)
+		} else {
+			fmt.Printf(sequenceFormatString, "pd-notify", body)
+		}
+	}
 }
 
 func paginate[T any](f func(next uint) (t []T, more bool, nnext uint)) []T {
@@ -38,33 +49,24 @@ func paginate[T any](f func(next uint) (t []T, more bool, nnext uint)) []T {
 }
 
 func logic() error {
+	overrideApiKey := flag.String("api-key", "", "PagerDuty API key (default is set from $PD_API_KEY)")
 	overrideUser := flag.String("user", "", "Name of user to listen for (default is current user)")
 	flag.Parse()
 
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		return err
-	}
-	alertIconPath := filepath.Join(cacheDir, "pd-notify-alert-icon.png")
-	if _, err := os.Stat(alertIconPath); errors.Is(err, os.ErrNotExist) {
-		alertIconFile, err := os.Create(alertIconPath)
-		if err != nil {
-			return err
-		}
-		if _, err := alertIconFile.Write(alertIconContents); err != nil {
-			return err
-		}
-		alertIconFile.Close()
-	} else if err != nil {
-		return err
-	}
+	var config *Config
+	{
+		var apiKey string
+		envApiKey, envApiKeyIsSet := os.LookupEnv("PD_API_KEY")
 
-	apiKey, ok := os.LookupEnv("PD_API_KEY")
-	if !ok {
-		return errors.New("could not find API key, make sure PD_API_KEY is set")
-	}
-	config := &Config{
-		ApiKey: apiKey,
+		if *overrideApiKey != "" {
+			apiKey = *overrideApiKey
+		} else if envApiKeyIsSet {
+			apiKey = envApiKey
+		} else {
+			return errors.New("could not find API key, make sure $PD_API_KEY is set or specify it via the -api-key flag")
+		}
+
+		config = &Config{ApiKey: apiKey}
 	}
 
 	client := pd.NewClient(config.ApiKey)
@@ -173,6 +175,8 @@ func logic() error {
 		time.Sleep(time.Until(oncallStart))
 	}
 
+	notify := getNotifier()
+
 	fmt.Println("Listening for incidents...")
 	for {
 		incidents := paginate(func(next uint) ([]pd.Incident, bool, uint) {
@@ -191,7 +195,7 @@ func logic() error {
 		for _, incident := range incidents {
 			if len(incident.Acknowledgements) == 0 {
 				fmt.Printf("new incident: incident %d\n", incident.IncidentNumber)
-				notifications.Notify(incident.Description, incident.Summary, alertIconPath)
+				notify(incident.Description)
 			}
 		}
 
@@ -208,6 +212,6 @@ func logic() error {
 
 func main() {
 	if err := logic(); err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	}
 }
