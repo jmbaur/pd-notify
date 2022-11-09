@@ -2,6 +2,12 @@
 
 Daemon that notifies on PagerDuty events.
 
+## Notifications
+
+This programs sends notifications via OSC escape sequences. It uses OSC 777 by
+default, but if your terminal does not support that, you can use the flag
+`-use-osc-9` instead, which should be more widely supported.
+
 ## Tmux Integration
 
 To use pd-notify with tmux and actually get the desktop notifications, you must

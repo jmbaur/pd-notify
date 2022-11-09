@@ -1,3 +1,4 @@
+// Package main is the entrypoint to the program.
 package main
 
 import (
@@ -15,29 +16,37 @@ import (
 	pd "github.com/PagerDuty/go-pagerduty"
 )
 
-type Config struct {
-	ApiKey string
+type config struct {
+	APIKey string
 }
 
 var (
-	sequenceFormatString     = "\033]777;notify;%s;%s\007"
+	osc9                     = "\033]9;%s: %s\007"
+	osc777                   = "\033]777;notify;%s;%s\007"
 	tmuxSequenceFormatString = "\033Ptmux;\033%s\033\\"
 )
 
-func getNotifier() func(body string) {
+func getNotifier(useOsc9 bool) func(body string) {
 	_, isTmux := os.LookupEnv("TMUX")
-	return func(body string) {
-		if isTmux {
-			fmt.Printf(fmt.Sprintf(tmuxSequenceFormatString, sequenceFormatString), "pd-notify", body)
+	var formatString string
+	if isTmux {
+		if useOsc9 {
+			formatString = fmt.Sprintf(tmuxSequenceFormatString, osc9)
 		} else {
-			fmt.Printf(sequenceFormatString, "pd-notify", body)
+			formatString = fmt.Sprintf(tmuxSequenceFormatString, osc777)
 		}
+	} else {
+		formatString = osc9
+		formatString = osc777
+	}
+	return func(body string) {
+		fmt.Printf(formatString, "pd-notify", body)
 	}
 }
 
 func paginate[T any](f func(next uint) (t []T, more bool, nnext uint)) []T {
 	allItems := []T{}
-	var next uint = 0
+	var next uint
 	for {
 		items, more, nnext := f(next)
 		next = nnext
@@ -51,15 +60,16 @@ func paginate[T any](f func(next uint) (t []T, more bool, nnext uint)) []T {
 }
 
 func logic() error {
-	overrideApiKeyFile := flag.String("api-key-file", "", "File that contains the PagerDuty API key (default will be set from $PD_API_KEY)")
+	overrideUseOsc9 := flag.Bool("use-osc-9", false, "Use OSC 9 instead of OSC 777 for sending notifications through the terminal")
+	overrideAPIKeyFile := flag.String("api-key-file", "", "File that contains the PagerDuty API key (default will be set from $PD_API_KEY)")
 	overrideUser := flag.String("user", "", "Name of user to listen for (default is current user)")
 	flag.Parse()
 
-	var config *Config
+	var cfg *config
 	{
 		var apiKey string
-		if *overrideApiKeyFile != "" {
-			f, err := os.Open(*overrideApiKeyFile)
+		if *overrideAPIKeyFile != "" {
+			f, err := os.Open(*overrideAPIKeyFile)
 			if err != nil {
 				return err
 			}
@@ -71,16 +81,16 @@ func logic() error {
 				return err
 			}
 			apiKey = string(bytes.TrimSpace(d))
-		} else if envApiKey, ok := os.LookupEnv("PD_API_KEY"); ok {
-			apiKey = envApiKey
+		} else if envAPIKey, ok := os.LookupEnv("PD_API_KEY"); ok {
+			apiKey = envAPIKey
 		} else {
 			return errors.New("could not find API key")
 		}
 
-		config = &Config{ApiKey: apiKey}
+		cfg = &config{APIKey: apiKey}
 	}
 
-	client := pd.NewClient(config.ApiKey)
+	client := pd.NewClient(cfg.APIKey)
 	currentUser, err := client.GetCurrentUser(pd.GetCurrentUserOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get user: %v", err)
@@ -186,7 +196,7 @@ func logic() error {
 		time.Sleep(time.Until(oncallStart))
 	}
 
-	notify := getNotifier()
+	notify := getNotifier(*overrideUseOsc9)
 
 	fmt.Println("Listening for incidents...")
 	for {

@@ -3,6 +3,6 @@ buildGoModule {
   pname = "pd-notify";
   version = "0.1.0";
   src = ./.;
-  vendorSha256 = "sha256-dl75K/2HRSSvY6x2ZUek7LPtVbY5vQW4u024MtIF9pw=";
+  vendorSha256 = "sha256-QJenPUIhfIXDHfCHoxX6CqOn+MGZrQPL97tvYP6iNno=";
   inherit CGO_ENABLED;
 }
