@@ -36,8 +36,11 @@ func getNotifier(useOsc9 bool) func(body string) {
 			formatString = fmt.Sprintf(tmuxSequenceFormatString, osc777)
 		}
 	} else {
-		formatString = osc9
-		formatString = osc777
+		if useOsc9 {
+			formatString = osc9
+		} else {
+			formatString = osc777
+		}
 	}
 	return func(body string) {
 		fmt.Printf(formatString, "pd-notify", body)
