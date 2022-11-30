@@ -20,7 +20,7 @@
       });
       devShells = forAllSystems ({ pkgs, ... }: {
         default = pkgs.mkShell {
-          inherit (pkgs.pd-notify) CGO_ENABLED nativeBuildInputs;
+          inherit (pkgs.pd-notify) nativeBuildInputs;
           buildInputs = with pkgs; [ revive ];
         };
       });
